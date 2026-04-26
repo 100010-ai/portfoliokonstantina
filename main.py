@@ -12,6 +12,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import load_config
 from handlers import router
+from kwork_email_notifier import is_configured as is_kwork_notifier_configured
+from kwork_email_notifier import start_kwork_email_notifier
 
 
 def setup_logging() -> None:
@@ -43,6 +45,9 @@ async def main() -> None:
 
         logging.info("Deleting webhook before polling")
         await bot.delete_webhook(drop_pending_updates=False, request_timeout=10)
+
+        if is_kwork_notifier_configured(config):
+            asyncio.create_task(start_kwork_email_notifier(bot, config))
 
         logging.info("Polling is starting now. Send /start to @%s", me.username)
         await dispatcher.start_polling(bot)

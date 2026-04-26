@@ -17,6 +17,13 @@ class Config:
     kwork_profile_url: str
     kwork_bot_service_url: str
     telegram_proxy_url: str
+    kwork_email_imap_host: str
+    kwork_email_imap_port: int
+    kwork_email_login: str
+    kwork_email_password: str
+    kwork_email_folder: str
+    kwork_email_from_filter: str
+    kwork_email_check_interval: int
 
 
 def load_config() -> Config:
@@ -27,6 +34,13 @@ def load_config() -> Config:
     kwork_profile_url = os.getenv("KWORK_PROFILE_URL", "").strip()
     kwork_bot_service_url = os.getenv("KWORK_BOT_SERVICE_URL", "").strip()
     telegram_proxy_url = os.getenv("TELEGRAM_PROXY_URL", "").strip()
+    kwork_email_imap_host = os.getenv("KWORK_EMAIL_IMAP_HOST", "").strip()
+    kwork_email_imap_port_raw = os.getenv("KWORK_EMAIL_IMAP_PORT", "993").strip()
+    kwork_email_login = os.getenv("KWORK_EMAIL_LOGIN", "").strip()
+    kwork_email_password = os.getenv("KWORK_EMAIL_PASSWORD", "").strip()
+    kwork_email_folder = os.getenv("KWORK_EMAIL_FOLDER", "INBOX").strip()
+    kwork_email_from_filter = os.getenv("KWORK_EMAIL_FROM_FILTER", "kwork").strip()
+    kwork_email_check_interval_raw = os.getenv("KWORK_EMAIL_CHECK_INTERVAL", "60").strip()
 
     if not bot_token:
         raise RuntimeError("BOT_TOKEN is not set. Add it to .env before starting the bot.")
@@ -46,10 +60,33 @@ def load_config() -> Config:
     if not kwork_bot_service_url:
         logger.warning("KWORK_BOT_SERVICE_URL is not set. Kwork order button will use kwork.ru.")
 
+    try:
+        kwork_email_imap_port = int(kwork_email_imap_port_raw)
+    except ValueError:
+        logger.warning("KWORK_EMAIL_IMAP_PORT must be an integer. Default 993 will be used.")
+        kwork_email_imap_port = 993
+
+    try:
+        kwork_email_check_interval = int(kwork_email_check_interval_raw)
+    except ValueError:
+        logger.warning("KWORK_EMAIL_CHECK_INTERVAL must be an integer. Default 60 will be used.")
+        kwork_email_check_interval = 60
+
+    if kwork_email_check_interval < 30:
+        logger.warning("KWORK_EMAIL_CHECK_INTERVAL is too low. Minimum 30 seconds will be used.")
+        kwork_email_check_interval = 30
+
     return Config(
         bot_token=bot_token,
         admin_id=admin_id,
         kwork_profile_url=kwork_profile_url,
         kwork_bot_service_url=kwork_bot_service_url,
         telegram_proxy_url=telegram_proxy_url,
+        kwork_email_imap_host=kwork_email_imap_host,
+        kwork_email_imap_port=kwork_email_imap_port,
+        kwork_email_login=kwork_email_login,
+        kwork_email_password=kwork_email_password,
+        kwork_email_folder=kwork_email_folder,
+        kwork_email_from_filter=kwork_email_from_filter,
+        kwork_email_check_interval=kwork_email_check_interval,
     )

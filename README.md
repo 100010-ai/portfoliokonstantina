@@ -10,6 +10,7 @@
 - Форма через FSM: тип бота, функции, срок, бюджет
 - Генерация краткого ТЗ для отправки при заказе на Kwork
 - Отправка предварительного ТЗ администратору, если указан `ADMIN_ID`
+- Уведомления админу о новых письмах от Kwork через IMAP
 - Предупреждение, что условия, оплата и переписка по заказу проходят через Kwork
 - Команды `/start`, `/menu`, `/help`
 - Обработчик неизвестных сообщений
@@ -51,6 +52,13 @@ ADMIN_ID=123456789
 KWORK_PROFILE_URL=https://kwork.ru/user/your_login
 KWORK_BOT_SERVICE_URL=https://kwork.ru/your_service_url
 TELEGRAM_PROXY_URL=
+KWORK_EMAIL_IMAP_HOST=
+KWORK_EMAIL_IMAP_PORT=993
+KWORK_EMAIL_LOGIN=
+KWORK_EMAIL_PASSWORD=
+KWORK_EMAIL_FOLDER=INBOX
+KWORK_EMAIL_FROM_FILTER=kwork
+KWORK_EMAIL_CHECK_INTERVAL=60
 ```
 
 Где:
@@ -60,6 +68,10 @@ TELEGRAM_PROXY_URL=
 - `KWORK_PROFILE_URL` — ссылка на ваш профиль Kwork
 - `KWORK_BOT_SERVICE_URL` — ссылка на услугу по разработке Telegram-ботов
 - `TELEGRAM_PROXY_URL` — необязательный HTTP/SOCKS-прокси для доступа к Bot API
+- `KWORK_EMAIL_IMAP_HOST` — IMAP-сервер почты, куда приходят уведомления Kwork
+- `KWORK_EMAIL_LOGIN` — email-логин
+- `KWORK_EMAIL_PASSWORD` — пароль приложения от почты
+- `KWORK_EMAIL_FROM_FILTER` — фильтр отправителя, по умолчанию `kwork`
 
 Узнать свой Telegram ID можно через специальных ботов вроде `@userinfobot`.
 
@@ -69,6 +81,43 @@ TELEGRAM_PROXY_URL=
 TELEGRAM_PROXY_URL=socks5://127.0.0.1:1080
 TELEGRAM_PROXY_URL=http://127.0.0.1:8080
 ```
+
+## Уведомления Kwork
+
+У Kwork нет удобного публичного webhook для сообщений, поэтому бот умеет проверять email-уведомления Kwork через IMAP и пересылать их админу в Telegram.
+
+1. Включите email-уведомления в аккаунте Kwork.
+2. Включите IMAP в настройках почты.
+3. Создайте пароль приложения для почты, если используется Gmail, Yandex или Mail.ru.
+4. Заполните IMAP-настройки в `.env`.
+
+Примеры:
+
+```env
+# Gmail
+KWORK_EMAIL_IMAP_HOST=imap.gmail.com
+KWORK_EMAIL_IMAP_PORT=993
+KWORK_EMAIL_LOGIN=your_email@gmail.com
+KWORK_EMAIL_PASSWORD=app_password
+```
+
+```env
+# Yandex
+KWORK_EMAIL_IMAP_HOST=imap.yandex.ru
+KWORK_EMAIL_IMAP_PORT=993
+KWORK_EMAIL_LOGIN=your_email@yandex.ru
+KWORK_EMAIL_PASSWORD=app_password
+```
+
+```env
+# Mail.ru
+KWORK_EMAIL_IMAP_HOST=imap.mail.ru
+KWORK_EMAIL_IMAP_PORT=993
+KWORK_EMAIL_LOGIN=your_email@mail.ru
+KWORK_EMAIL_PASSWORD=app_password
+```
+
+Бот проверяет только непрочитанные письма от отправителя по фильтру `KWORK_EMAIL_FROM_FILTER` и отправляет админу короткое уведомление: тема, отправитель, дата и ссылка на Kwork.
 
 ## Запуск
 
@@ -102,6 +151,7 @@ config.py        # загрузка переменных окружения
 keyboards.py     # inline-клавиатуры и callback-константы
 texts.py         # все тексты сообщений
 handlers.py      # команды, кнопки, FSM краткого ТЗ и ошибки
+kwork_email_notifier.py # IMAP-уведомления о письмах Kwork
 requirements.txt # зависимости
 .env.example     # пример переменных окружения
 README.md        # инструкция запуска
