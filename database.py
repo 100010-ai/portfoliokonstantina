@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from contextlib import contextmanager
@@ -96,8 +95,8 @@ def init_database(config: Config) -> None:
         ):
             connection.execute(_adapt_query(config, query))
 
+    purge_fake_seed_reviews(config)
     logger.info("Database initialized: %s", "PostgreSQL" if _is_postgres(config) else f"SQLite {config.sqlite_path}")
-    bootstrap_reviews(config)
 
 
 def is_email_processed(config: Config, message_id: str) -> bool:
@@ -212,39 +211,44 @@ def get_public_reviews(config: Config, limit: int = 8) -> list[StoredReview]:
     ]
 
 
-def _load_seed_reviews(config: Config) -> list[dict]:
-    raw_json = config.reviews_json
-    if not raw_json:
-        try:
-            with open("reviews.json", "r", encoding="utf-8") as file:
-                raw_json = file.read()
-        except FileNotFoundError:
-            return []
+def purge_fake_seed_reviews(config: Config) -> int:
+    fake_texts = (
+        "Бот сделан аккуратно, все основные сценарии работают понятно. Заявки приходят в удобном формате.",
+        "Получился удобный бот с каталогом и оформлением заказа. Константин помог продумать структуру и запуск.",
+        "Хорошо собрана логика ответов и понятное меню. После теста быстро внесены правки.",
+    )
+    fake_projects = (
+        "Telegram-бот для заявок",
+        "Бот-магазин",
+        "AI-ассистент",
+    )
 
-    try:
-        data = json.loads(raw_json)
-    except json.JSONDecodeError:
-        logger.exception("Could not parse reviews seed JSON.")
-        return []
+    deleted = 0
+    with _connect(config) as connection:
+        for text in fake_texts:
+            cursor = connection.execute(
+                _adapt_query(config, "DELETE FROM reviews WHERE text = ?"),
+                (text,),
+            )
+            deleted += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
 
-    return data if isinstance(data, list) else []
+        for project in fake_projects:
+            cursor = connection.execute(
+                _adapt_query(
+                    config,
+                    """
+                    DELETE FROM reviews
+                    WHERE project = ?
+                    AND author IN ('Клиент Kwork', 'РљР»РёРµРЅС‚ Kwork')
+                    """,
+                ),
+                (project,),
+            )
+            deleted += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
 
-
-def bootstrap_reviews(config: Config) -> None:
-    if get_public_reviews(config, limit=1):
-        return
-
-    for item in _load_seed_reviews(config):
-        if not isinstance(item, dict) or not item.get("text"):
-            continue
-        add_review(
-            config,
-            author=str(item.get("author", "Клиент Kwork")),
-            rating=_rating(item.get("rating", 5)),
-            project=str(item.get("project", "")),
-            text=str(item["text"]),
-            source=str(item.get("source", "Kwork")),
-        )
+    if deleted:
+        logger.warning("Removed fake seed reviews from database. deleted=%s", deleted)
+    return deleted
 
 
 def get_stats(config: Config) -> DatabaseStats:

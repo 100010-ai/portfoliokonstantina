@@ -25,28 +25,18 @@ def build_reviews_text(config: Config) -> str:
         reviews = get_public_reviews(config)
     except Exception:
         logger.exception("Could not load reviews.")
-        _cache_text = """
-<b>Отзывы</b>
-
-Сейчас отзывы временно недоступны. Попробуйте открыть раздел позже.
-""".strip()
+        _cache_text = "<b>Отзывы</b>\n\nСейчас раздел временно недоступен."
         _cache_expires_at = now + 60
         return _cache_text
 
     if not reviews:
-        _cache_text = """
-<b>Отзывы</b>
-
-Пока отзывов нет. Это нормально, если профиль Kwork только запущен.
-
-Когда появятся первые завершенные заказы и публичные отзывы на Kwork, бот сможет подтянуть их в этот раздел через синхронизацию.
-""".strip()
+        _cache_text = "<b>Отзывы</b>\n\nПока отзывов нет."
         _cache_expires_at = now + _CACHE_TTL_SECONDS
         return _cache_text
 
     blocks = [
         "<b>Отзывы клиентов</b>",
-        "<i>Отзывы из выполненных заказов на Kwork или из сохраненной базы.</i>",
+        "<i>Отзывы с Kwork.</i>",
     ]
     for index, review in enumerate(reviews, start=1):
         stars = "★" * review.rating + "☆" * (5 - review.rating)

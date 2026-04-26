@@ -26,7 +26,6 @@ class Config:
     telegram_proxy_url: str
     database_url: str
     sqlite_path: str
-    reviews_json: str
     kwork_email_imap_host: str
     kwork_email_imap_port: int
     kwork_email_login: str
@@ -98,7 +97,6 @@ def load_config() -> Config:
         telegram_proxy_url=os.getenv("TELEGRAM_PROXY_URL", "").strip(),
         database_url=os.getenv("DATABASE_URL", "").strip(),
         sqlite_path=os.getenv("SQLITE_PATH", "bot_data.sqlite3").strip(),
-        reviews_json=os.getenv("REVIEWS_JSON", "").strip(),
         kwork_email_imap_host=os.getenv("KWORK_EMAIL_IMAP_HOST", "").strip(),
         kwork_email_imap_port=kwork_email_imap_port,
         kwork_email_login=os.getenv("KWORK_EMAIL_LOGIN", "").strip(),
