@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 CALLBACK_ABOUT = "section:about"
 CALLBACK_SERVICES = "section:services"
 CALLBACK_WORKS = "section:works"
+CALLBACK_REVIEWS = "section:reviews"
 CALLBACK_PRICES = "section:prices"
 CALLBACK_PROCESS = "section:process"
 CALLBACK_FAQ = "section:faq"
@@ -19,14 +20,15 @@ DEFAULT_KWORK_URL = "https://kwork.ru"
 
 
 MAIN_MENU_BUTTONS = (
-    ("👤 Обо мне", CALLBACK_ABOUT),
-    ("🧰 Услуги", CALLBACK_SERVICES),
-    ("📂 Кейсы", CALLBACK_WORKS),
-    ("💳 Пакеты", CALLBACK_PRICES),
-    ("🧭 Этапы", CALLBACK_PROCESS),
+    ("👤 Константин", CALLBACK_ABOUT),
+    ("🧰 Что делаю", CALLBACK_SERVICES),
+    ("📂 Примеры", CALLBACK_WORKS),
+    ("⭐ Отзывы", CALLBACK_REVIEWS),
+    ("💳 Цены", CALLBACK_PRICES),
+    ("🧭 Процесс", CALLBACK_PROCESS),
     ("💬 FAQ", CALLBACK_FAQ),
     ("📝 Собрать ТЗ", CALLBACK_REQUEST),
-    ("🛒 Kwork", CALLBACK_KWORK),
+    ("🛒 Заказать", CALLBACK_KWORK),
     ("📌 Как оформить заказ", CALLBACK_ORDER_GUIDE),
 )
 
@@ -76,6 +78,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             _button(text=MAIN_MENU_BUTTONS[7][0], callback_data=MAIN_MENU_BUTTONS[7][1]),
         ],
         [_button(text=MAIN_MENU_BUTTONS[8][0], callback_data=MAIN_MENU_BUTTONS[8][1])],
+        [_button(text=MAIN_MENU_BUTTONS[9][0], callback_data=MAIN_MENU_BUTTONS[9][1])],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -99,7 +102,7 @@ def form_keyboard() -> InlineKeyboardMarkup:
 def kwork_keyboard(profile_url: str, service_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [_button(text="🛒 Открыть мой Kwork", url=profile_url)],
+            [_button(text="🛒 Открыть профиль Kwork", url=profile_url)],
             [_button(text="🤖 Заказать Telegram-бота", url=service_url)],
             [_button(text="← Назад", callback_data=CALLBACK_BACK)],
         ]
@@ -108,7 +111,7 @@ def kwork_keyboard(profile_url: str, service_url: str) -> InlineKeyboardMarkup:
 
 def kwork_order_keyboard(service_url: str, copy_text: str | None = None) -> InlineKeyboardMarkup:
     rows = []
-    if copy_text:
+    if copy_text and len(copy_text) <= 256:
         rows.append([_button(text="📋 Скопировать ТЗ", copy_text=copy_text)])
     rows.append([_button(text="🛒 Оформить заказ на Kwork", url=service_url)])
     rows.append([_button(text="← Назад", callback_data=CALLBACK_BACK)])

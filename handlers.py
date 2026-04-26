@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 
@@ -11,6 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from config import Config
+from database import add_review, save_technical_spec
 from keyboards import (
     CALLBACK_ABOUT,
     CALLBACK_BACK,
@@ -21,6 +23,7 @@ from keyboards import (
     CALLBACK_PRICES,
     CALLBACK_PROCESS,
     CALLBACK_REQUEST,
+    CALLBACK_REVIEWS,
     CALLBACK_SERVICES,
     CALLBACK_WORKS,
     back_keyboard,
@@ -29,6 +32,8 @@ from keyboards import (
     kwork_order_keyboard,
     main_menu_keyboard,
 )
+from reviews import build_reviews_text, clear_reviews_cache
+from review_sync import sync_reviews_once
 from texts import (
     ABOUT_TEXT,
     EMPTY_ANSWER_TEXT,
@@ -41,9 +46,6 @@ from texts import (
     PRICES_TEXT,
     PROCESS_TEXT,
     REQUEST_ADMIN_TEXT,
-    REQUEST_BUDGET_TEXT,
-    REQUEST_DEADLINE_TEXT,
-    REQUEST_FEATURES_TEXT,
     REQUEST_START_TEXT,
     REQUEST_SUCCESS_TEXT,
     SERVICES_TEXT,
@@ -51,19 +53,21 @@ from texts import (
     UNKNOWN_TEXT,
     WORKS_TEXT,
 )
+from tz_builder import build_technical_spec
 
 
 logger = logging.getLogger(__name__)
 router = Router()
+MAX_TZ_INPUT_LENGTH = 1500
 
 
 @router.message.outer_middleware()
 async def log_messages(handler, event: Message, data: dict):
     logger.info(
-        "Incoming message from user_id=%s chat_id=%s text=%r",
+        "Incoming message from user_id=%s chat_id=%s text_present=%s",
         event.from_user.id if event.from_user else None,
         event.chat.id,
-        event.text,
+        bool(event.text),
     )
     return await handler(event, data)
 
@@ -79,10 +83,7 @@ async def log_callbacks(handler, event: CallbackQuery, data: dict):
 
 
 class RequestForm(StatesGroup):
-    bot_type = State()
-    features = State()
-    deadline = State()
-    budget = State()
+    description = State()
 
 
 SECTION_TEXTS = {
@@ -100,6 +101,15 @@ SECTION_CALLBACKS = tuple(SECTION_TEXTS.keys())
 
 async def _show_main_menu(message: Message) -> None:
     await message.answer(START_TEXT, reply_markup=main_menu_keyboard())
+
+
+async def _delete_quietly(message: Message | None) -> None:
+    if message is None:
+        return
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
 
 
 async def _edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None) -> None:
@@ -120,14 +130,15 @@ def _clean(value: str) -> str:
     return html.escape(value.strip())
 
 
+def _escape_limited(value: str, limit: int = 3200) -> str:
+    value = value.strip()
+    if len(value) > limit:
+        value = f"{value[: limit - 40].rstrip()}\n\n...ТЗ получилось длинным, полный текст можно доработать на Kwork."
+    return html.escape(value)
+
+
 def _build_brief_text(data: dict[str, str]) -> str:
-    return (
-        "Краткое ТЗ для заказа на Kwork\n\n"
-        f"Тип бота: {data['bot_type']}\n"
-        f"Что должен уметь бот: {data['features']}\n"
-        f"Желаемый срок: {data['deadline']}\n"
-        f"Примерный бюджет: {data['budget']}"
-    )
+    return build_technical_spec(data).plain_text
 
 
 @router.message(CommandStart())
@@ -151,10 +162,40 @@ async def help_command(message: Message, state: FSMContext) -> None:
     await message.answer(HELP_TEXT, reply_markup=main_menu_keyboard())
 
 
+@router.message(Command("status"))
+async def status_command(message: Message, config: Config) -> None:
+    if config.admin_id is None or not message.from_user or message.from_user.id != config.admin_id:
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    kwork_email_enabled = bool(
+        config.kwork_email_imap_host and config.kwork_email_login and config.kwork_email_password
+    )
+    status_text = f"""
+<b>Статус бота</b>
+
+<b>Kwork профиль:</b> {"заполнен" if config.kwork_profile_url else "не заполнен"}
+<b>Kwork услуга:</b> {"заполнена" if config.kwork_bot_service_url else "не заполнена"}
+<b>Ссылка отзывов:</b> {"заполнена" if config.kwork_reviews_url else "не заполнена"}
+<b>База данных:</b> {"PostgreSQL" if config.database_url else "SQLite"}
+<b>Email-уведомления Kwork:</b> {"включены" if kwork_email_enabled else "выключены"}
+<b>Синхронизация отзывов:</b> каждые {config.reviews_sync_interval} сек.
+<b>IMAP папка:</b> {html.escape(config.kwork_email_folder)}
+<b>Интервал проверки:</b> {config.kwork_email_check_interval} сек.
+""".strip()
+    await message.answer(status_text, reply_markup=main_menu_keyboard())
+
+
 @router.callback_query(F.data.in_(SECTION_CALLBACKS))
 async def show_section(callback: CallbackQuery) -> None:
     logger.info("Show section callback=%s", callback.data)
     await _edit_or_answer(callback, SECTION_TEXTS[callback.data], reply_markup=back_keyboard())
+
+
+@router.callback_query(F.data == CALLBACK_REVIEWS)
+async def show_reviews(callback: CallbackQuery, config: Config) -> None:
+    logger.info("Show reviews")
+    await _edit_or_answer(callback, build_reviews_text(config), reply_markup=back_keyboard())
 
 
 @router.callback_query(F.data == CALLBACK_KWORK)
@@ -177,66 +218,64 @@ async def main_menu_callback(callback: CallbackQuery, state: FSMContext) -> None
 @router.callback_query(F.data == CALLBACK_REQUEST)
 async def start_request(callback: CallbackQuery, state: FSMContext) -> None:
     logger.info("Start request form")
-    await state.set_state(RequestForm.bot_type)
+    await state.set_state(RequestForm.description)
     await _edit_or_answer(callback, REQUEST_START_TEXT, reply_markup=form_keyboard())
+    if callback.message:
+        await state.update_data(last_bot_message_id=callback.message.message_id)
 
 
-@router.message(RequestForm.bot_type)
-async def request_bot_type(message: Message, state: FSMContext) -> None:
+@router.message(RequestForm.description)
+async def request_description(message: Message, state: FSMContext, bot: Bot, config: Config) -> None:
     if not message.text or not message.text.strip():
         await message.answer(EMPTY_ANSWER_TEXT, reply_markup=form_keyboard())
         return
 
-    await state.update_data(bot_type=message.text.strip())
-    await state.set_state(RequestForm.features)
-    await message.answer(REQUEST_FEATURES_TEXT, reply_markup=form_keyboard())
-
-
-@router.message(RequestForm.features)
-async def request_features(message: Message, state: FSMContext) -> None:
-    if not message.text or not message.text.strip():
-        await message.answer(EMPTY_ANSWER_TEXT, reply_markup=form_keyboard())
+    if len(message.text.strip()) < 15:
+        warning = await message.answer(
+            "Опишите чуть подробнее: для чего нужен бот и что он должен делать. Можно одним сообщением простыми словами.",
+            reply_markup=form_keyboard(),
+        )
+        await state.update_data(last_bot_message_id=warning.message_id)
         return
 
-    await state.update_data(features=message.text.strip())
-    await state.set_state(RequestForm.deadline)
-    await message.answer(REQUEST_DEADLINE_TEXT, reply_markup=form_keyboard())
+    description = message.text.strip()
+    if len(description) > MAX_TZ_INPUT_LENGTH:
+        description = description[:MAX_TZ_INPUT_LENGTH].rstrip()
 
+    state_data = await state.get_data()
+    await _delete_quietly(message)
+    if state_data.get("last_bot_message_id"):
+        try:
+            await bot.delete_message(message.chat.id, state_data["last_bot_message_id"])
+        except TelegramBadRequest:
+            pass
 
-@router.message(RequestForm.deadline)
-async def request_deadline(message: Message, state: FSMContext) -> None:
-    if not message.text or not message.text.strip():
-        await message.answer(EMPTY_ANSWER_TEXT, reply_markup=form_keyboard())
-        return
-
-    await state.update_data(deadline=message.text.strip())
-    await state.set_state(RequestForm.budget)
-    await message.answer(REQUEST_BUDGET_TEXT, reply_markup=form_keyboard())
-
-
-@router.message(RequestForm.budget)
-async def request_budget(message: Message, state: FSMContext, bot: Bot, config: Config) -> None:
-    if not message.text or not message.text.strip():
-        await message.answer(EMPTY_ANSWER_TEXT, reply_markup=form_keyboard())
-        return
-
-    await state.update_data(budget=message.text.strip())
-    data = await state.get_data()
+    data = {"description": description}
     await state.clear()
 
     username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else "не указан"
+    technical_spec = build_technical_spec(data)
+    await asyncio.to_thread(
+        save_technical_spec,
+        config,
+        user_id=message.from_user.id if message.from_user else None,
+        username=username,
+        bot_type=technical_spec.bot_type,
+        features=technical_spec.features_summary,
+        deadline=technical_spec.deadline,
+        budget=technical_spec.budget,
+        spec_text=technical_spec.plain_text,
+    )
     cleaned_data = {
-        "bot_type": _clean(data["bot_type"]),
-        "features": _clean(data["features"]),
-        "deadline": _clean(data["deadline"]),
-        "budget": _clean(data["budget"]),
+        "technical_spec": _escape_limited(technical_spec.plain_text),
     }
     admin_text = REQUEST_ADMIN_TEXT.format(
         **cleaned_data,
         username=_clean(username),
     )
 
-    await message.answer(
+    await bot.send_message(
+        message.chat.id,
         REQUEST_SUCCESS_TEXT.format(**cleaned_data),
         reply_markup=kwork_order_keyboard(config.kwork_bot_service_url, _build_brief_text(data)),
     )
@@ -253,6 +292,60 @@ async def request_budget(message: Message, state: FSMContext, bot: Bot, config: 
         logger.exception("Could not send request to admin.")
 
 
+@router.message(Command("add_review"))
+async def add_review_command(message: Message, config: Config) -> None:
+    if config.admin_id is None or not message.from_user or message.from_user.id != config.admin_id:
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    raw_text = (message.text or "").removeprefix("/add_review").strip()
+    parts = [part.strip() for part in raw_text.split("|")]
+    if len(parts) < 4:
+        await message.answer(
+            "Формат:\n"
+            "<code>/add_review 5 | Клиент Kwork | Telegram-бот | Текст отзыва</code>"
+        )
+        return
+
+    rating_raw, author, project, review_text = parts[0], parts[1], parts[2], " | ".join(parts[3:])
+    try:
+        rating = int(rating_raw)
+    except ValueError:
+        rating = 5
+
+    await asyncio.to_thread(
+        add_review,
+        config,
+        author=author,
+        rating=rating,
+        project=project,
+        text=review_text,
+        source="Kwork",
+    )
+    clear_reviews_cache()
+    await message.answer("Отзыв добавлен в базу и теперь виден всем в разделе «Отзывы».")
+
+
+@router.message(Command("sync_reviews"))
+async def sync_reviews_command(message: Message, config: Config) -> None:
+    if config.admin_id is None or not message.from_user or message.from_user.id != config.admin_id:
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    await message.answer("Запускаю синхронизацию отзывов с публичной страницы Kwork...")
+    try:
+        added_count = await asyncio.to_thread(sync_reviews_once, config)
+    except Exception:
+        logger.exception("Manual reviews sync failed.")
+        await message.answer(
+            "Не удалось синхронизировать отзывы. Проверьте KWORK_REVIEWS_URL/KWORK_PROFILE_URL и логи Railway."
+        )
+        return
+
+    clear_reviews_cache()
+    await message.answer(f"Синхронизация завершена. Новых отзывов добавлено: {added_count}.")
+
+
 @router.callback_query(F.data == CALLBACK_BACK)
 async def cancel_form_or_back(callback: CallbackQuery, state: FSMContext) -> None:
     logger.info("Back callback")
@@ -260,7 +353,10 @@ async def cancel_form_or_back(callback: CallbackQuery, state: FSMContext) -> Non
     if current_state is not None:
         await state.clear()
         if callback.message:
-            await callback.message.answer(FORM_CANCELLED_TEXT)
+            try:
+                await callback.answer(FORM_CANCELLED_TEXT, show_alert=False)
+            except TelegramBadRequest:
+                pass
 
     await _edit_or_answer(callback, START_TEXT, reply_markup=main_menu_keyboard())
 

@@ -5,13 +5,17 @@ import email
 import html
 import imaplib
 import logging
+import re
 from dataclasses import dataclass
 from email.header import decode_header
 from email.message import Message
+from html.parser import HTMLParser
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import Config
+from database import is_email_processed, mark_email_processed
 
 
 logger = logging.getLogger(__name__)
@@ -20,9 +24,25 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class KworkEmailNotification:
     message_id: str
+    event_type: str
     sender: str
     subject: str
     date: str
+    preview: str
+    matched_keyword: str
+
+
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        if data.strip():
+            self.parts.append(data.strip())
+
+    def get_text(self) -> str:
+        return " ".join(self.parts)
 
 
 def is_configured(config: Config) -> bool:
@@ -47,6 +67,96 @@ def _decode_mime_header(value: str | None) -> str:
     return "".join(parts).strip()
 
 
+def _decode_payload(message: Message) -> str:
+    payload = message.get_payload(decode=True)
+    if not payload:
+        return ""
+
+    charset = message.get_content_charset() or "utf-8"
+    return payload.decode(charset, errors="replace")
+
+
+def _html_to_text(value: str) -> str:
+    parser = _HTMLTextExtractor()
+    parser.feed(value)
+    return parser.get_text()
+
+
+def _extract_body(message: Message) -> str:
+    if message.is_multipart():
+        html_body = ""
+        for part in message.walk():
+            content_type = part.get_content_type()
+            disposition = part.get_content_disposition()
+            if disposition == "attachment":
+                continue
+            if content_type == "text/plain":
+                return _decode_payload(part)
+            if content_type == "text/html" and not html_body:
+                html_body = _decode_payload(part)
+        return _html_to_text(html_body)
+
+    body = _decode_payload(message)
+    if message.get_content_type() == "text/html":
+        return _html_to_text(body)
+    return body
+
+
+def _compact_text(value: str, limit: int = 320) -> str:
+    compact = re.sub(r"\s+", " ", value).strip()
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 1].rstrip()}..."
+
+
+def _find_keyword(text: str, keywords: tuple[str, ...]) -> str:
+    lower_text = text.lower()
+    for keyword in keywords:
+        if keyword and keyword in lower_text:
+            return keyword
+    return ""
+
+
+def _detect_kwork_event(message: Message, subject: str, body: str, config: Config) -> tuple[str, str]:
+    sender = _decode_mime_header(message.get("From"))
+    header_text = f"{sender}\n{subject}"
+    full_text = f"{header_text}\n{body}"
+
+    order_keyword = _find_keyword(header_text, config.kwork_email_order_keywords)
+    if order_keyword:
+        return "order", order_keyword
+
+    review_keyword = _find_keyword(header_text, config.kwork_email_review_keywords)
+    if review_keyword:
+        return "review", review_keyword
+
+    client_keyword = _find_keyword(header_text, config.kwork_email_client_keywords)
+    if client_keyword:
+        return "message", client_keyword
+
+    promo_keyword = _find_keyword(header_text, config.kwork_email_promo_keywords)
+    if promo_keyword:
+        return "promo", promo_keyword
+
+    order_keyword = _find_keyword(full_text, config.kwork_email_order_keywords)
+    if order_keyword:
+        return "order", order_keyword
+
+    review_keyword = _find_keyword(full_text, config.kwork_email_review_keywords)
+    if review_keyword:
+        return "review", review_keyword
+
+    client_keyword = _find_keyword(full_text, config.kwork_email_client_keywords)
+    if client_keyword:
+        return "message", client_keyword
+
+    promo_keyword = _find_keyword(full_text, config.kwork_email_promo_keywords)
+    if promo_keyword:
+        return "promo", promo_keyword
+
+    return "unknown", ""
+
+
 def _fetch_unseen_notifications(config: Config) -> list[KworkEmailNotification]:
     notifications: list[KworkEmailNotification] = []
 
@@ -69,12 +179,28 @@ def _fetch_unseen_notifications(config: Config) -> list[KworkEmailNotification]:
                     continue
 
                 message: Message = email.message_from_bytes(item[1])
+                subject = _decode_mime_header(message.get("Subject"))
+                body = _extract_body(message)
+                event_type, keyword = _detect_kwork_event(message, subject, body, config)
+                if event_type in {"promo", "unknown"}:
+                    logger.info(
+                        "Kwork email skipped. id=%s subject=%r type=%s marker=%r",
+                        message_id.decode(errors="replace"),
+                        subject,
+                        event_type,
+                        keyword,
+                    )
+                    continue
+
                 notifications.append(
                     KworkEmailNotification(
                         message_id=message_id.decode(errors="replace"),
+                        event_type=event_type,
                         sender=_decode_mime_header(message.get("From")),
-                        subject=_decode_mime_header(message.get("Subject")),
+                        subject=subject,
                         date=_decode_mime_header(message.get("Date")),
+                        preview=_compact_text(body),
+                        matched_keyword=keyword,
                     )
                 )
 
@@ -83,13 +209,35 @@ def _fetch_unseen_notifications(config: Config) -> list[KworkEmailNotification]:
 
 def _format_notification(notification: KworkEmailNotification, config: Config) -> str:
     kwork_link = config.kwork_profile_url or "https://kwork.ru"
+    title_by_type = {
+        "order": "Новый заказ на Kwork",
+        "review": "Новый отзыв на Kwork",
+        "message": "Сообщение клиента на Kwork",
+    }
+    action_by_type = {
+        "order": "Откройте Kwork и начинайте работу только после появления заказа на странице заказов.",
+        "review": "Проверьте отзыв на Kwork. После проверки его можно добавить в публичный раздел отзывов.",
+        "message": "Отвечайте клиенту внутри Kwork.",
+    }
     return (
-        "<b>Новое уведомление от Kwork</b>\n\n"
+        f"<b>{title_by_type.get(notification.event_type, 'Уведомление Kwork')}</b>\n\n"
         f"<b>Тема:</b> {html.escape(notification.subject or 'без темы')}\n"
-        f"<b>От:</b> {html.escape(notification.sender or 'не указан')}\n"
-        f"<b>Дата:</b> {html.escape(notification.date or 'не указана')}\n\n"
-        f'<a href="{html.escape(kwork_link)}">Открыть Kwork</a>\n\n'
-        "<i>Проверьте сообщение и отвечайте клиенту внутри Kwork.</i>"
+        f"<b>Отправитель:</b> {html.escape(notification.sender or 'не указан')}\n"
+        f"<b>Дата:</b> {html.escape(notification.date or 'не указана')}\n"
+        f"<b>Маркер:</b> {html.escape(notification.matched_keyword or 'клиентское письмо')}\n\n"
+        f"<b>Фрагмент:</b>\n{html.escape(notification.preview or 'текст письма не найден')}\n\n"
+        f'<a href="{html.escape(kwork_link)}">Открыть Kwork и ответить</a>\n\n'
+        f"<i>{action_by_type.get(notification.event_type, 'Проверьте Kwork.')} "
+        "Рекламные рассылки и скидки бот пропускает.</i>"
+    )
+
+
+def _notification_keyboard(config: Config) -> InlineKeyboardMarkup:
+    url = config.kwork_profile_url or config.kwork_bot_service_url or "https://kwork.ru"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Открыть Kwork", url=url)],
+        ]
     )
 
 
@@ -104,7 +252,22 @@ async def start_kwork_email_notifier(bot: Bot, config: Config) -> None:
         try:
             notifications = await asyncio.to_thread(_fetch_unseen_notifications, config)
             for notification in notifications:
-                await bot.send_message(config.admin_id, _format_notification(notification, config))
+                if await asyncio.to_thread(is_email_processed, config, notification.message_id):
+                    logger.info("Kwork email already processed. id=%s", notification.message_id)
+                    continue
+
+                await bot.send_message(
+                    config.admin_id,
+                    _format_notification(notification, config),
+                    reply_markup=_notification_keyboard(config),
+                )
+                await asyncio.to_thread(
+                    mark_email_processed,
+                    config,
+                    notification.message_id,
+                    notification.event_type,
+                    notification.subject,
+                )
                 logger.info("Kwork email notification sent for email id=%s", notification.message_id)
         except asyncio.CancelledError:
             raise
