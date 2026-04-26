@@ -27,6 +27,17 @@ class DatabaseStats:
     processed_emails: int
 
 
+@dataclass(frozen=True)
+class StoredTechnicalSpec:
+    id: int
+    username: str
+    bot_type: str
+    deadline: str
+    budget: str
+    spec_text: str
+    created_at: str
+
+
 def _is_postgres(config: Config) -> bool:
     return bool(config.database_url)
 
@@ -206,6 +217,36 @@ def get_public_reviews(config: Config, limit: int = 8) -> list[StoredReview]:
             project=row["project"] or "",
             text=row["text"],
             source=row["source"] or "Kwork",
+        )
+        for row in rows
+    ]
+
+
+def get_recent_technical_specs(config: Config, limit: int = 5) -> list[StoredTechnicalSpec]:
+    with _connect(config) as connection:
+        cursor = connection.execute(
+            _adapt_query(
+                config,
+                """
+                SELECT id, username, bot_type, deadline, budget, spec_text, created_at
+                FROM technical_specs
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+            ),
+            (limit,),
+        )
+        rows = cursor.fetchall()
+
+    return [
+        StoredTechnicalSpec(
+            id=int(row["id"]),
+            username=row["username"] or "не указан",
+            bot_type=row["bot_type"] or "не указан",
+            deadline=row["deadline"] or "не указан",
+            budget=row["budget"] or "не указан",
+            spec_text=row["spec_text"] or "",
+            created_at=str(row["created_at"] or ""),
         )
         for row in rows
     ]

@@ -86,6 +86,7 @@ worker: python main.py
 
 ```text
 /status
+/last_tz
 /sync_reviews
 /add_review 5 | Клиент Kwork | Telegram-бот | Реальный текст отзыва
 ```

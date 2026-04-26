@@ -31,7 +31,10 @@ def _pick(text: str, rules: list[tuple[tuple[str, ...], str]], default: str) -> 
 
 
 def _items(items: list[str]) -> str:
-    return "\n".join(f"- {item}" for item in dict.fromkeys(items))
+    unique_items = list(dict.fromkeys(item for item in items if item))
+    if not unique_items:
+        return "- не указано"
+    return "\n".join(f"- {item}" for item in unique_items)
 
 
 def _extract_deadline(text: str, fallback: str = "нужно согласовать") -> str:
@@ -314,45 +317,34 @@ def _build_from_description(description: str, deadline: str = "", budget: str = 
     title = f"ТЗ: {bot_type}"
 
     plain_text = f"""
-Техническое задание для заказа на Kwork
+ТЗ для заказа на Kwork
 
-1. Проект
+1. Тип бота
 {bot_type}
 
-2. Цель
-Разработать Telegram-бота, который будет {goal}.
+2. Задача
+Бот должен {goal}.
 
-3. Для кого бот
+3. Для кого
 {audience}.
 
-4. Что написал клиент
-{description}
-
-5. Основной функционал
+4. Функции
 {_items(modules)}
 
-6. Какие данные нужно хранить или передавать
+5. Данные
 {_items(data_fields)}
 
-7. Логика работы
-{_build_flow(description)}
-
-8. Интеграции
+6. Интеграции
 {_items(integrations)}
 
-9. Минимальная первая версия
+7. Первая версия
 {_items(mvp)}
 
-10. Срок
-{deadline}
+8. Срок и бюджет
+Срок: {deadline}
+Бюджет: {budget}
 
-11. Бюджет
-{budget}
-
-12. Важные моменты
-{_items(risks)}
-
-13. Что уточнить перед стартом
+9. Уточнить
 {_items(questions)}
 """.strip()
 

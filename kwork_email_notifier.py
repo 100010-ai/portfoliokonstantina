@@ -164,11 +164,12 @@ def _fetch_unseen_notifications(config: Config) -> list[KworkEmailNotification]:
                 body = _extract_body(message)
                 event_type, keyword = _detect_kwork_event(message, subject, body, config)
                 decoded_id = message_id.decode(errors="replace")
+                stable_id = _decode_mime_header(message.get("Message-ID")) or decoded_id
 
                 if event_type in {"promo", "unknown"}:
                     logger.info(
                         "Kwork email skipped. id=%s subject=%r type=%s marker=%r",
-                        decoded_id,
+                        stable_id,
                         subject,
                         event_type,
                         keyword,
@@ -177,7 +178,7 @@ def _fetch_unseen_notifications(config: Config) -> list[KworkEmailNotification]:
 
                 notifications.append(
                     KworkEmailNotification(
-                        message_id=decoded_id,
+                        message_id=stable_id,
                         event_type=event_type,
                         sender=_decode_mime_header(message.get("From")),
                         subject=subject,

@@ -17,6 +17,7 @@ CALLBACK_ADMIN = "admin:panel"
 CALLBACK_ADMIN_STATUS = "admin:status"
 CALLBACK_ADMIN_SYNC_REVIEWS = "admin:sync_reviews"
 CALLBACK_ADMIN_HELP = "admin:help"
+CALLBACK_ADMIN_LAST_TZ = "admin:last_tz"
 CALLBACK_MAIN_MENU = "menu:main"
 CALLBACK_BACK = "menu:back"
 
@@ -94,8 +95,9 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 _button(text="📊 Статус", callback_data=CALLBACK_ADMIN_STATUS),
-                _button(text="⭐ Синхра отзывов", callback_data=CALLBACK_ADMIN_SYNC_REVIEWS),
+                _button(text="📝 ТЗ", callback_data=CALLBACK_ADMIN_LAST_TZ),
             ],
+            [_button(text="⭐ Синхра отзывов", callback_data=CALLBACK_ADMIN_SYNC_REVIEWS)],
             [_button(text="➕ Как добавить отзыв", callback_data=CALLBACK_ADMIN_HELP)],
             [_button(text="← В меню", callback_data=CALLBACK_BACK)],
         ]

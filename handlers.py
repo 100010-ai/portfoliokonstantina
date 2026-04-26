@@ -12,11 +12,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from config import Config
-from database import add_review, get_stats, save_technical_spec
+from database import add_review, get_recent_technical_specs, get_stats, save_technical_spec
 from keyboards import (
     CALLBACK_ABOUT,
     CALLBACK_ADMIN,
     CALLBACK_ADMIN_HELP,
+    CALLBACK_ADMIN_LAST_TZ,
     CALLBACK_ADMIN_STATUS,
     CALLBACK_ADMIN_SYNC_REVIEWS,
     CALLBACK_BACK,
@@ -44,7 +45,6 @@ from texts import (
     EMPTY_ANSWER_TEXT,
     ERROR_TEXT,
     FAQ_TEXT,
-    FORM_CANCELLED_TEXT,
     HELP_TEXT,
     KWORK_TEXT,
     ORDER_GUIDE_TEXT,
@@ -156,18 +156,36 @@ def _status_text(config: Config) -> str:
 
 def _admin_help_text() -> str:
     return """
-<b>➕ Добавление отзыва вручную</b>
+<b>Админ</b>
 
-Команда:
 <code>/add_review 5 | Клиент Kwork | Telegram-бот | Текст отзыва</code>
-
-<b>Админ-команды:</b>
-<code>/status</code> - статус и статистика
-<code>/sync_reviews</code> - ручная синхронизация отзывов Kwork
-<code>/menu</code> - главное меню
-
-Автоматическая синхронизация отзывов работает только по публичной странице Kwork. Если отзывов еще нет, раздел будет показывать спокойную заглушку.
+<code>/last_tz</code> - последние ТЗ
+<code>/status</code> - статус
+<code>/sync_reviews</code> - синхра отзывов
 """.strip()
+
+
+def _latest_tz_text(config: Config) -> str:
+    specs = get_recent_technical_specs(config, limit=3)
+    if not specs:
+        return "<b>Последние ТЗ</b>\n\nПока пусто."
+
+    blocks = ["<b>Последние ТЗ</b>"]
+    for item in specs:
+        preview = item.spec_text.strip()
+        if len(preview) > 550:
+            preview = f"{preview[:550].rstrip()}..."
+        blocks.append(
+            f"""
+<b>#{item.id}</b> {html.escape(item.username)}
+<b>Тип:</b> {html.escape(item.bot_type)}
+<b>Срок:</b> {html.escape(item.deadline)}
+<b>Бюджет:</b> {html.escape(item.budget)}
+
+<pre>{html.escape(preview)}</pre>
+""".strip()
+        )
+    return "\n\n".join(blocks)
 
 
 async def _show_main_menu(message: Message, config: Config | None = None) -> None:
@@ -225,6 +243,15 @@ async def status_command(message: Message, config: Config) -> None:
     await message.answer(status_text, reply_markup=admin_keyboard())
 
 
+@router.message(Command("last_tz"))
+async def last_tz_command(message: Message, config: Config) -> None:
+    if not _is_admin_message(message, config):
+        await message.answer(ADMIN_ONLY_TEXT)
+        return
+    text = await asyncio.to_thread(_latest_tz_text, config)
+    await message.answer(text, reply_markup=admin_keyboard())
+
+
 @router.callback_query(F.data.in_(SECTION_CALLBACKS))
 async def show_section(callback: CallbackQuery) -> None:
     await _edit_or_answer(callback, SECTION_TEXTS[callback.data], reply_markup=back_keyboard())
@@ -279,6 +306,15 @@ async def admin_help_callback(callback: CallbackQuery, config: Config) -> None:
         await callback.answer("Недоступно", show_alert=False)
         return
     await _edit_or_answer(callback, _admin_help_text(), reply_markup=admin_keyboard())
+
+
+@router.callback_query(F.data == CALLBACK_ADMIN_LAST_TZ)
+async def admin_last_tz_callback(callback: CallbackQuery, config: Config) -> None:
+    if not _is_admin_user(callback, config):
+        await callback.answer("Недоступно", show_alert=False)
+        return
+    text = await asyncio.to_thread(_latest_tz_text, config)
+    await _edit_or_answer(callback, text, reply_markup=admin_keyboard())
 
 
 @router.callback_query(F.data == CALLBACK_ADMIN_SYNC_REVIEWS)
@@ -442,10 +478,6 @@ async def cancel_form_or_back(callback: CallbackQuery, state: FSMContext, config
     current_state = await state.get_state()
     if current_state is not None:
         await state.clear()
-        try:
-            await callback.answer(FORM_CANCELLED_TEXT, show_alert=False)
-        except TelegramBadRequest:
-            pass
 
     await _edit_or_answer(
         callback,
