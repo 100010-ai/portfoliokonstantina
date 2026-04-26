@@ -37,14 +37,17 @@ def build_reviews_text(config: Config) -> str:
         _cache_text = """
 <b>Отзывы</b>
 
-Пока отзывы не добавлены.
+Пока отзывов нет. Это нормально, если профиль Kwork только запущен.
 
-После первых завершенных заказов на Kwork сюда можно добавить реальные отзывы через базу данных, файл <b>reviews.json</b> или переменную Railway <b>REVIEWS_JSON</b>.
+Когда появятся первые завершенные заказы и публичные отзывы на Kwork, бот сможет подтянуть их в этот раздел через синхронизацию.
 """.strip()
         _cache_expires_at = now + _CACHE_TTL_SECONDS
         return _cache_text
 
-    blocks = ["<b>Отзывы клиентов</b>", "<i>Отзывы из выполненных заказов на Kwork.</i>"]
+    blocks = [
+        "<b>Отзывы клиентов</b>",
+        "<i>Отзывы из выполненных заказов на Kwork или из сохраненной базы.</i>",
+    ]
     for index, review in enumerate(reviews, start=1):
         stars = "★" * review.rating + "☆" * (5 - review.rating)
         project = f"\n<b>Проект:</b> {html.escape(review.project)}" if review.project else ""

@@ -13,6 +13,10 @@ CALLBACK_FAQ = "section:faq"
 CALLBACK_KWORK = "section:kwork"
 CALLBACK_ORDER_GUIDE = "section:order_guide"
 CALLBACK_REQUEST = "request:start"
+CALLBACK_ADMIN = "admin:panel"
+CALLBACK_ADMIN_STATUS = "admin:status"
+CALLBACK_ADMIN_SYNC_REVIEWS = "admin:sync_reviews"
+CALLBACK_ADMIN_HELP = "admin:help"
 CALLBACK_MAIN_MENU = "menu:main"
 CALLBACK_BACK = "menu:back"
 
@@ -21,14 +25,14 @@ DEFAULT_KWORK_URL = "https://kwork.ru"
 
 MAIN_MENU_BUTTONS = (
     ("👤 Константин", CALLBACK_ABOUT),
-    ("🧰 Что делаю", CALLBACK_SERVICES),
+    ("🧰 Услуги", CALLBACK_SERVICES),
     ("📂 Примеры", CALLBACK_WORKS),
     ("⭐ Отзывы", CALLBACK_REVIEWS),
     ("💳 Цены", CALLBACK_PRICES),
     ("🧭 Процесс", CALLBACK_PROCESS),
     ("💬 FAQ", CALLBACK_FAQ),
     ("📝 Собрать ТЗ", CALLBACK_REQUEST),
-    ("🛒 Заказать", CALLBACK_KWORK),
+    ("🛒 Заказать бота", CALLBACK_KWORK),
     ("📌 Как оформить заказ", CALLBACK_ORDER_GUIDE),
 )
 
@@ -59,7 +63,7 @@ def _button(
         return InlineKeyboardButton(**payload)
 
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
+def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [
             _button(text=MAIN_MENU_BUTTONS[0][0], callback_data=MAIN_MENU_BUTTONS[0][1]),
@@ -80,7 +84,22 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         [_button(text=MAIN_MENU_BUTTONS[8][0], callback_data=MAIN_MENU_BUTTONS[8][1])],
         [_button(text=MAIN_MENU_BUTTONS[9][0], callback_data=MAIN_MENU_BUTTONS[9][1])],
     ]
+    if is_admin:
+        rows.append([_button(text="⚙️ Админ-панель", callback_data=CALLBACK_ADMIN)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _button(text="📊 Статус", callback_data=CALLBACK_ADMIN_STATUS),
+                _button(text="⭐ Синхра отзывов", callback_data=CALLBACK_ADMIN_SYNC_REVIEWS),
+            ],
+            [_button(text="➕ Как добавить отзыв", callback_data=CALLBACK_ADMIN_HELP)],
+            [_button(text="← В меню", callback_data=CALLBACK_BACK)],
+        ]
+    )
 
 
 def back_keyboard() -> InlineKeyboardMarkup:
@@ -92,17 +111,13 @@ def back_keyboard() -> InlineKeyboardMarkup:
 
 
 def form_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [_button(text="← Назад", callback_data=CALLBACK_BACK)],
-        ]
-    )
+    return back_keyboard()
 
 
 def kwork_keyboard(profile_url: str, service_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [_button(text="🛒 Открыть профиль Kwork", url=profile_url)],
+            [_button(text="🛒 Открыть мой Kwork", url=profile_url)],
             [_button(text="🤖 Заказать Telegram-бота", url=service_url)],
             [_button(text="← Назад", callback_data=CALLBACK_BACK)],
         ]
@@ -116,6 +131,4 @@ def kwork_order_keyboard(service_url: str, copy_text: str | None = None) -> Inli
     rows.append([_button(text="🛒 Оформить заказ на Kwork", url=service_url)])
     rows.append([_button(text="← Назад", callback_data=CALLBACK_BACK)])
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
-    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)

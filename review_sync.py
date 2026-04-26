@@ -25,21 +25,20 @@ class ParsedReview:
     source: str = "Kwork"
 
 
-def is_configured(config: Config) -> bool:
-    return bool(config.kwork_reviews_url or config.kwork_profile_url or config.kwork_bot_service_url)
-
-
 def _reviews_url(config: Config) -> str:
     return config.kwork_reviews_url or config.kwork_profile_url or config.kwork_bot_service_url
+
+
+def is_configured(config: Config) -> bool:
+    url = _reviews_url(config)
+    return url.startswith(("http://", "https://"))
 
 
 def _fetch_page(url: str) -> str:
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": (
-                "Mozilla/5.0 (compatible; PortfolioBot/1.0; +https://telegram.org/bot)"
-            ),
+            "User-Agent": "Mozilla/5.0 (compatible; PortfolioBot/1.0; +https://telegram.org/bot)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
     )
@@ -60,12 +59,6 @@ def _clean_text(value: Any) -> str:
     text = html.unescape(str(value or ""))
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
-
-
-def _as_list(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    return value if isinstance(value, list) else [value]
 
 
 def _walk_json(value: Any):
@@ -141,7 +134,6 @@ def parse_reviews_from_page(page: str) -> list[ParsedReview]:
             if review:
                 reviews.append(review)
 
-    # Fallback for pages that expose compact review fragments in inline scripts.
     if not reviews:
         for text in re.findall(r'"reviewBody"\s*:\s*"([^"]{20,1000})"', page):
             reviews.append(ParsedReview(author="Клиент Kwork", rating=5, project="", text=_clean_text(text)))
@@ -154,11 +146,10 @@ def parse_reviews_from_page(page: str) -> list[ParsedReview]:
 
 def sync_reviews_once(config: Config) -> int:
     if not is_configured(config):
-        logger.info("Kwork reviews sync is disabled: no public Kwork URL configured.")
+        logger.info("Kwork reviews sync is disabled: no valid public Kwork URL configured.")
         return 0
 
-    url = _reviews_url(config)
-    page = _fetch_page(url)
+    page = _fetch_page(_reviews_url(config))
     parsed_reviews = parse_reviews_from_page(page)
     added_count = 0
 

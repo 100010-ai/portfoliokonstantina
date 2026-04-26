@@ -12,9 +12,13 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
 from config import Config
-from database import add_review, save_technical_spec
+from database import add_review, get_stats, save_technical_spec
 from keyboards import (
     CALLBACK_ABOUT,
+    CALLBACK_ADMIN,
+    CALLBACK_ADMIN_HELP,
+    CALLBACK_ADMIN_STATUS,
+    CALLBACK_ADMIN_SYNC_REVIEWS,
     CALLBACK_BACK,
     CALLBACK_FAQ,
     CALLBACK_KWORK,
@@ -26,14 +30,15 @@ from keyboards import (
     CALLBACK_REVIEWS,
     CALLBACK_SERVICES,
     CALLBACK_WORKS,
+    admin_keyboard,
     back_keyboard,
     form_keyboard,
     kwork_keyboard,
     kwork_order_keyboard,
     main_menu_keyboard,
 )
-from reviews import build_reviews_text, clear_reviews_cache
 from review_sync import sync_reviews_once
+from reviews import build_reviews_text, clear_reviews_cache
 from texts import (
     ABOUT_TEXT,
     EMPTY_ANSWER_TEXT,
@@ -59,6 +64,7 @@ from tz_builder import build_technical_spec
 logger = logging.getLogger(__name__)
 router = Router()
 MAX_TZ_INPUT_LENGTH = 1500
+ADMIN_ONLY_TEXT = "Команда доступна только администратору."
 
 
 @router.message.outer_middleware()
@@ -74,11 +80,7 @@ async def log_messages(handler, event: Message, data: dict):
 
 @router.callback_query.outer_middleware()
 async def log_callbacks(handler, event: CallbackQuery, data: dict):
-    logger.info(
-        "Incoming callback from user_id=%s data=%r",
-        event.from_user.id,
-        event.data,
-    )
+    logger.info("Incoming callback from user_id=%s data=%r", event.from_user.id, event.data)
     return await handler(event, data)
 
 
@@ -95,12 +97,82 @@ SECTION_TEXTS = {
     CALLBACK_FAQ: FAQ_TEXT,
     CALLBACK_ORDER_GUIDE: ORDER_GUIDE_TEXT,
 }
-
 SECTION_CALLBACKS = tuple(SECTION_TEXTS.keys())
 
 
-async def _show_main_menu(message: Message) -> None:
-    await message.answer(START_TEXT, reply_markup=main_menu_keyboard())
+def _is_admin_user(message_or_callback, config: Config) -> bool:
+    user = getattr(message_or_callback, "from_user", None)
+    return bool(config.admin_id is not None and user and user.id == config.admin_id)
+
+
+def _is_admin_message(message: Message, config: Config) -> bool:
+    return bool(config.admin_id is not None and message.from_user and message.from_user.id == config.admin_id)
+
+
+def _clean(value: str) -> str:
+    return html.escape(value.strip())
+
+
+def _escape_limited(value: str, limit: int = 3200) -> str:
+    value = value.strip()
+    if len(value) > limit:
+        value = f"{value[: limit - 70].rstrip()}\n\n...ТЗ получилось длинным, полный текст сохранен в базе."
+    return html.escape(value)
+
+
+def _build_brief_text(data: dict[str, str]) -> str:
+    return build_technical_spec(data).plain_text
+
+
+def _status_text(config: Config) -> str:
+    email_enabled = bool(config.kwork_email_imap_host and config.kwork_email_login and config.kwork_email_password)
+    try:
+        stats = get_stats(config)
+        stats_text = (
+            f"<b>ТЗ в базе:</b> {stats.technical_specs}\n"
+            f"<b>Отзывы:</b> {stats.reviews}\n"
+            f"<b>Обработано email:</b> {stats.processed_emails}"
+        )
+    except Exception:
+        logger.exception("Could not load database stats.")
+        stats_text = "<b>Статистика базы:</b> временно недоступна"
+
+    return f"""
+<b>⚙️ Админ-панель</b>
+
+<b>Kwork профиль:</b> {"заполнен" if config.kwork_profile_url else "не заполнен"}
+<b>Kwork услуга:</b> {"заполнена" if config.kwork_bot_service_url else "не заполнена"}
+<b>Ссылка отзывов:</b> {"заполнена" if config.kwork_reviews_url else "не заполнена"}
+<b>База данных:</b> {"PostgreSQL" if config.database_url else "SQLite"}
+<b>Email-уведомления:</b> {"включены" if email_enabled else "выключены"}
+
+{stats_text}
+
+<b>IMAP папка:</b> {html.escape(config.kwork_email_folder)}
+<b>Проверка почты:</b> каждые {config.kwork_email_check_interval} сек.
+<b>Синхра отзывов:</b> каждые {config.reviews_sync_interval} сек.
+""".strip()
+
+
+def _admin_help_text() -> str:
+    return """
+<b>➕ Добавление отзыва вручную</b>
+
+Команда:
+<code>/add_review 5 | Клиент Kwork | Telegram-бот | Текст отзыва</code>
+
+<b>Админ-команды:</b>
+<code>/status</code> - статус и статистика
+<code>/sync_reviews</code> - ручная синхронизация отзывов Kwork
+<code>/menu</code> - главное меню
+
+Автоматическая синхронизация отзывов работает только по публичной странице Kwork. Если отзывов еще нет, раздел будет показывать спокойную заглушку.
+""".strip()
+
+
+async def _show_main_menu(message: Message, config: Config | None = None) -> None:
+    is_admin = bool(config and _is_admin_message(message, config))
+    await message.answer(START_TEXT, reply_markup=main_menu_keyboard(is_admin=is_admin))
 
 
 async def _delete_quietly(message: Message | None) -> None:
@@ -114,7 +186,6 @@ async def _delete_quietly(message: Message | None) -> None:
 
 async def _edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None) -> None:
     await callback.answer()
-
     if callback.message is None:
         return
 
@@ -126,81 +197,47 @@ async def _edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None)
             await callback.message.answer(text, reply_markup=reply_markup)
 
 
-def _clean(value: str) -> str:
-    return html.escape(value.strip())
-
-
-def _escape_limited(value: str, limit: int = 3200) -> str:
-    value = value.strip()
-    if len(value) > limit:
-        value = f"{value[: limit - 40].rstrip()}\n\n...ТЗ получилось длинным, полный текст можно доработать на Kwork."
-    return html.escape(value)
-
-
-def _build_brief_text(data: dict[str, str]) -> str:
-    return build_technical_spec(data).plain_text
-
-
 @router.message(CommandStart())
-async def start_command(message: Message, state: FSMContext) -> None:
+async def start_command(message: Message, state: FSMContext, config: Config) -> None:
     logger.info("Received /start from user_id=%s", message.from_user.id if message.from_user else None)
     await state.clear()
-    await _show_main_menu(message)
+    await _show_main_menu(message, config)
 
 
 @router.message(Command("menu"))
-async def menu_command(message: Message, state: FSMContext) -> None:
-    logger.info("Received /menu from user_id=%s", message.from_user.id if message.from_user else None)
+async def menu_command(message: Message, state: FSMContext, config: Config) -> None:
     await state.clear()
-    await _show_main_menu(message)
+    await _show_main_menu(message, config)
 
 
 @router.message(Command("help"))
-async def help_command(message: Message, state: FSMContext) -> None:
-    logger.info("Received /help from user_id=%s", message.from_user.id if message.from_user else None)
+async def help_command(message: Message, state: FSMContext, config: Config) -> None:
     await state.clear()
-    await message.answer(HELP_TEXT, reply_markup=main_menu_keyboard())
+    await message.answer(HELP_TEXT, reply_markup=main_menu_keyboard(is_admin=_is_admin_message(message, config)))
 
 
 @router.message(Command("status"))
 async def status_command(message: Message, config: Config) -> None:
-    if config.admin_id is None or not message.from_user or message.from_user.id != config.admin_id:
-        await message.answer("Команда доступна только администратору.")
+    if not _is_admin_message(message, config):
+        await message.answer(ADMIN_ONLY_TEXT)
         return
-
-    kwork_email_enabled = bool(
-        config.kwork_email_imap_host and config.kwork_email_login and config.kwork_email_password
-    )
-    status_text = f"""
-<b>Статус бота</b>
-
-<b>Kwork профиль:</b> {"заполнен" if config.kwork_profile_url else "не заполнен"}
-<b>Kwork услуга:</b> {"заполнена" if config.kwork_bot_service_url else "не заполнена"}
-<b>Ссылка отзывов:</b> {"заполнена" if config.kwork_reviews_url else "не заполнена"}
-<b>База данных:</b> {"PostgreSQL" if config.database_url else "SQLite"}
-<b>Email-уведомления Kwork:</b> {"включены" if kwork_email_enabled else "выключены"}
-<b>Синхронизация отзывов:</b> каждые {config.reviews_sync_interval} сек.
-<b>IMAP папка:</b> {html.escape(config.kwork_email_folder)}
-<b>Интервал проверки:</b> {config.kwork_email_check_interval} сек.
-""".strip()
-    await message.answer(status_text, reply_markup=main_menu_keyboard())
+    status_text = await asyncio.to_thread(_status_text, config)
+    await message.answer(status_text, reply_markup=admin_keyboard())
 
 
 @router.callback_query(F.data.in_(SECTION_CALLBACKS))
 async def show_section(callback: CallbackQuery) -> None:
-    logger.info("Show section callback=%s", callback.data)
     await _edit_or_answer(callback, SECTION_TEXTS[callback.data], reply_markup=back_keyboard())
 
 
 @router.callback_query(F.data == CALLBACK_REVIEWS)
 async def show_reviews(callback: CallbackQuery, config: Config) -> None:
-    logger.info("Show reviews")
-    await _edit_or_answer(callback, build_reviews_text(config), reply_markup=back_keyboard())
+    text = await asyncio.to_thread(build_reviews_text, config)
+    await _edit_or_answer(callback, text, reply_markup=back_keyboard())
 
 
 @router.callback_query(F.data == CALLBACK_KWORK)
 async def show_kwork_section(callback: CallbackQuery, config: Config) -> None:
-    logger.info("Show Kwork section")
     await _edit_or_answer(
         callback,
         KWORK_TEXT,
@@ -209,15 +246,66 @@ async def show_kwork_section(callback: CallbackQuery, config: Config) -> None:
 
 
 @router.callback_query(F.data == CALLBACK_MAIN_MENU)
-async def main_menu_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    logger.info("Show main menu")
+async def main_menu_callback(callback: CallbackQuery, state: FSMContext, config: Config) -> None:
     await state.clear()
-    await _edit_or_answer(callback, START_TEXT, reply_markup=main_menu_keyboard())
+    await _edit_or_answer(
+        callback,
+        START_TEXT,
+        reply_markup=main_menu_keyboard(is_admin=_is_admin_user(callback, config)),
+    )
+
+
+@router.callback_query(F.data == CALLBACK_ADMIN)
+async def admin_panel_callback(callback: CallbackQuery, config: Config) -> None:
+    if not _is_admin_user(callback, config):
+        await callback.answer("Недоступно", show_alert=False)
+        return
+    status_text = await asyncio.to_thread(_status_text, config)
+    await _edit_or_answer(callback, status_text, reply_markup=admin_keyboard())
+
+
+@router.callback_query(F.data == CALLBACK_ADMIN_STATUS)
+async def admin_status_callback(callback: CallbackQuery, config: Config) -> None:
+    if not _is_admin_user(callback, config):
+        await callback.answer("Недоступно", show_alert=False)
+        return
+    status_text = await asyncio.to_thread(_status_text, config)
+    await _edit_or_answer(callback, status_text, reply_markup=admin_keyboard())
+
+
+@router.callback_query(F.data == CALLBACK_ADMIN_HELP)
+async def admin_help_callback(callback: CallbackQuery, config: Config) -> None:
+    if not _is_admin_user(callback, config):
+        await callback.answer("Недоступно", show_alert=False)
+        return
+    await _edit_or_answer(callback, _admin_help_text(), reply_markup=admin_keyboard())
+
+
+@router.callback_query(F.data == CALLBACK_ADMIN_SYNC_REVIEWS)
+async def admin_sync_reviews_callback(callback: CallbackQuery, config: Config) -> None:
+    if not _is_admin_user(callback, config):
+        await callback.answer("Недоступно", show_alert=False)
+        return
+
+    await callback.answer("Запускаю синхронизацию...")
+    try:
+        added_count = await asyncio.to_thread(sync_reviews_once, config)
+    except Exception:
+        logger.exception("Manual reviews sync failed.")
+        text = "Не удалось синхронизировать отзывы. Проверьте KWORK_REVIEWS_URL/KWORK_PROFILE_URL и логи Railway."
+    else:
+        clear_reviews_cache()
+        text = f"<b>Синхронизация завершена</b>\n\nНовых отзывов добавлено: {added_count}."
+
+    if callback.message:
+        try:
+            await callback.message.edit_text(text, reply_markup=admin_keyboard())
+        except TelegramBadRequest:
+            await callback.message.answer(text, reply_markup=admin_keyboard())
 
 
 @router.callback_query(F.data == CALLBACK_REQUEST)
 async def start_request(callback: CallbackQuery, state: FSMContext) -> None:
-    logger.info("Start request form")
     await state.set_state(RequestForm.description)
     await _edit_or_answer(callback, REQUEST_START_TEXT, reply_markup=form_keyboard())
     if callback.message:
@@ -230,7 +318,8 @@ async def request_description(message: Message, state: FSMContext, bot: Bot, con
         await message.answer(EMPTY_ANSWER_TEXT, reply_markup=form_keyboard())
         return
 
-    if len(message.text.strip()) < 15:
+    description = message.text.strip()
+    if len(description) < 15:
         warning = await message.answer(
             "Опишите чуть подробнее: для чего нужен бот и что он должен делать. Можно одним сообщением простыми словами.",
             reply_markup=form_keyboard(),
@@ -238,7 +327,6 @@ async def request_description(message: Message, state: FSMContext, bot: Bot, con
         await state.update_data(last_bot_message_id=warning.message_id)
         return
 
-    description = message.text.strip()
     if len(description) > MAX_TZ_INPUT_LENGTH:
         description = description[:MAX_TZ_INPUT_LENGTH].rstrip()
 
@@ -250,11 +338,11 @@ async def request_description(message: Message, state: FSMContext, bot: Bot, con
         except TelegramBadRequest:
             pass
 
-    data = {"description": description}
     await state.clear()
-
+    data = {"description": description}
     username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else "не указан"
     technical_spec = build_technical_spec(data)
+
     await asyncio.to_thread(
         save_technical_spec,
         config,
@@ -266,13 +354,13 @@ async def request_description(message: Message, state: FSMContext, bot: Bot, con
         budget=technical_spec.budget,
         spec_text=technical_spec.plain_text,
     )
+
     cleaned_data = {
+        "bot_type": _clean(technical_spec.bot_type),
+        "deadline": _clean(technical_spec.deadline),
+        "budget": _clean(technical_spec.budget),
         "technical_spec": _escape_limited(technical_spec.plain_text),
     }
-    admin_text = REQUEST_ADMIN_TEXT.format(
-        **cleaned_data,
-        username=_clean(username),
-    )
 
     await bot.send_message(
         message.chat.id,
@@ -280,12 +368,14 @@ async def request_description(message: Message, state: FSMContext, bot: Bot, con
         reply_markup=kwork_order_keyboard(config.kwork_bot_service_url, _build_brief_text(data)),
     )
 
-    if config.admin_id is None:
+    admin_id = config.admin_id
+    if admin_id is None:
         logger.warning("Request received, but ADMIN_ID is not configured.")
         return
 
+    admin_text = REQUEST_ADMIN_TEXT.format(**cleaned_data, username=_clean(username))
     try:
-        await bot.send_message(config.admin_id, admin_text)
+        await bot.send_message(admin_id, admin_text)
     except TelegramForbiddenError:
         logger.exception("Could not send request to admin. The bot may be blocked by admin.")
     except Exception:
@@ -294,8 +384,8 @@ async def request_description(message: Message, state: FSMContext, bot: Bot, con
 
 @router.message(Command("add_review"))
 async def add_review_command(message: Message, config: Config) -> None:
-    if config.admin_id is None or not message.from_user or message.from_user.id != config.admin_id:
-        await message.answer("Команда доступна только администратору.")
+    if not _is_admin_message(message, config):
+        await message.answer(ADMIN_ONLY_TEXT)
         return
 
     raw_text = (message.text or "").removeprefix("/add_review").strip()
@@ -313,7 +403,7 @@ async def add_review_command(message: Message, config: Config) -> None:
     except ValueError:
         rating = 5
 
-    await asyncio.to_thread(
+    added = await asyncio.to_thread(
         add_review,
         config,
         author=author,
@@ -323,13 +413,16 @@ async def add_review_command(message: Message, config: Config) -> None:
         source="Kwork",
     )
     clear_reviews_cache()
-    await message.answer("Отзыв добавлен в базу и теперь виден всем в разделе «Отзывы».")
+    if added:
+        await message.answer("Отзыв добавлен в базу и теперь виден всем в разделе «Отзывы».")
+    else:
+        await message.answer("Отзыв не добавлен: он пустой или уже есть в базе.")
 
 
 @router.message(Command("sync_reviews"))
 async def sync_reviews_command(message: Message, config: Config) -> None:
-    if config.admin_id is None or not message.from_user or message.from_user.id != config.admin_id:
-        await message.answer("Команда доступна только администратору.")
+    if not _is_admin_message(message, config):
+        await message.answer(ADMIN_ONLY_TEXT)
         return
 
     await message.answer("Запускаю синхронизацию отзывов с публичной страницы Kwork...")
@@ -337,9 +430,7 @@ async def sync_reviews_command(message: Message, config: Config) -> None:
         added_count = await asyncio.to_thread(sync_reviews_once, config)
     except Exception:
         logger.exception("Manual reviews sync failed.")
-        await message.answer(
-            "Не удалось синхронизировать отзывы. Проверьте KWORK_REVIEWS_URL/KWORK_PROFILE_URL и логи Railway."
-        )
+        await message.answer("Не удалось синхронизировать отзывы. Проверьте KWORK_REVIEWS_URL/KWORK_PROFILE_URL и логи Railway.")
         return
 
     clear_reviews_cache()
@@ -347,18 +438,20 @@ async def sync_reviews_command(message: Message, config: Config) -> None:
 
 
 @router.callback_query(F.data == CALLBACK_BACK)
-async def cancel_form_or_back(callback: CallbackQuery, state: FSMContext) -> None:
-    logger.info("Back callback")
+async def cancel_form_or_back(callback: CallbackQuery, state: FSMContext, config: Config) -> None:
     current_state = await state.get_state()
     if current_state is not None:
         await state.clear()
-        if callback.message:
-            try:
-                await callback.answer(FORM_CANCELLED_TEXT, show_alert=False)
-            except TelegramBadRequest:
-                pass
+        try:
+            await callback.answer(FORM_CANCELLED_TEXT, show_alert=False)
+        except TelegramBadRequest:
+            pass
 
-    await _edit_or_answer(callback, START_TEXT, reply_markup=main_menu_keyboard())
+    await _edit_or_answer(
+        callback,
+        START_TEXT,
+        reply_markup=main_menu_keyboard(is_admin=_is_admin_user(callback, config)),
+    )
 
 
 @router.callback_query()
@@ -367,8 +460,8 @@ async def unknown_callback(callback: CallbackQuery) -> None:
 
 
 @router.message()
-async def unknown_message(message: Message) -> None:
-    await message.answer(UNKNOWN_TEXT, reply_markup=main_menu_keyboard())
+async def unknown_message(message: Message, config: Config) -> None:
+    await message.answer(UNKNOWN_TEXT, reply_markup=main_menu_keyboard(is_admin=_is_admin_message(message, config)))
 
 
 @router.errors(ExceptionTypeFilter(Exception))

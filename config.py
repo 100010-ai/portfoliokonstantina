@@ -40,27 +40,19 @@ class Config:
     kwork_email_check_interval: int
 
 
+def _parse_int(value: str, default: int, name: str) -> int:
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("%s must be an integer. Default %s will be used.", name, default)
+        return default
+
+
 def load_config() -> Config:
     load_dotenv()
 
     bot_token = os.getenv("BOT_TOKEN", "").strip()
     admin_id_raw = os.getenv("ADMIN_ID", "").strip()
-    kwork_profile_url = os.getenv("KWORK_PROFILE_URL", "").strip()
-    kwork_bot_service_url = os.getenv("KWORK_BOT_SERVICE_URL", "").strip()
-    kwork_reviews_url = os.getenv("KWORK_REVIEWS_URL", "").strip()
-    reviews_sync_interval_raw = os.getenv("REVIEWS_SYNC_INTERVAL", "21600").strip()
-    telegram_proxy_url = os.getenv("TELEGRAM_PROXY_URL", "").strip()
-    database_url = os.getenv("DATABASE_URL", "").strip()
-    sqlite_path = os.getenv("SQLITE_PATH", "bot_data.sqlite3").strip()
-    reviews_json = os.getenv("REVIEWS_JSON", "").strip()
-
-    kwork_email_imap_host = os.getenv("KWORK_EMAIL_IMAP_HOST", "").strip()
-    kwork_email_imap_port_raw = os.getenv("KWORK_EMAIL_IMAP_PORT", "993").strip()
-    kwork_email_login = os.getenv("KWORK_EMAIL_LOGIN", "").strip()
-    kwork_email_password = os.getenv("KWORK_EMAIL_PASSWORD", "").strip()
-    kwork_email_folder = os.getenv("KWORK_EMAIL_FOLDER", "INBOX").strip()
-    kwork_email_from_filter = os.getenv("KWORK_EMAIL_FROM_FILTER", "kwork").strip()
-    kwork_email_check_interval_raw = os.getenv("KWORK_EMAIL_CHECK_INTERVAL", "60").strip()
 
     if not bot_token:
         raise RuntimeError("BOT_TOKEN is not set. Add it to .env or Railway Variables.")
@@ -74,35 +66,25 @@ def load_config() -> Config:
     else:
         logger.warning("ADMIN_ID is not set. Admin notifications are disabled.")
 
-    try:
-        kwork_email_imap_port = int(kwork_email_imap_port_raw)
-    except ValueError:
-        logger.warning("KWORK_EMAIL_IMAP_PORT must be an integer. Default 993 will be used.")
-        kwork_email_imap_port = 993
-
-    try:
-        kwork_email_check_interval = int(kwork_email_check_interval_raw)
-    except ValueError:
-        logger.warning("KWORK_EMAIL_CHECK_INTERVAL must be an integer. Default 60 will be used.")
-        kwork_email_check_interval = 60
-
+    kwork_email_imap_port = _parse_int(os.getenv("KWORK_EMAIL_IMAP_PORT", "993").strip(), 993, "KWORK_EMAIL_IMAP_PORT")
+    kwork_email_check_interval = _parse_int(
+        os.getenv("KWORK_EMAIL_CHECK_INTERVAL", "60").strip(),
+        60,
+        "KWORK_EMAIL_CHECK_INTERVAL",
+    )
     if kwork_email_check_interval < 30:
         logger.warning("KWORK_EMAIL_CHECK_INTERVAL is too low. Minimum 30 seconds will be used.")
         kwork_email_check_interval = 30
 
-    try:
-        reviews_sync_interval = int(reviews_sync_interval_raw)
-    except ValueError:
-        logger.warning("REVIEWS_SYNC_INTERVAL must be an integer. Default 21600 will be used.")
-        reviews_sync_interval = 21600
-
+    reviews_sync_interval = _parse_int(os.getenv("REVIEWS_SYNC_INTERVAL", "21600").strip(), 21600, "REVIEWS_SYNC_INTERVAL")
     if reviews_sync_interval < 600:
         logger.warning("REVIEWS_SYNC_INTERVAL is too low. Minimum 600 seconds will be used.")
         reviews_sync_interval = 600
 
+    kwork_profile_url = os.getenv("KWORK_PROFILE_URL", "").strip()
+    kwork_bot_service_url = os.getenv("KWORK_BOT_SERVICE_URL", "").strip()
     if not kwork_profile_url:
         logger.warning("KWORK_PROFILE_URL is not set. Kwork profile button will use kwork.ru.")
-
     if not kwork_bot_service_url:
         logger.warning("KWORK_BOT_SERVICE_URL is not set. Kwork order button will use kwork.ru.")
 
@@ -111,18 +93,18 @@ def load_config() -> Config:
         admin_id=admin_id,
         kwork_profile_url=kwork_profile_url,
         kwork_bot_service_url=kwork_bot_service_url,
-        kwork_reviews_url=kwork_reviews_url,
+        kwork_reviews_url=os.getenv("KWORK_REVIEWS_URL", "").strip(),
         reviews_sync_interval=reviews_sync_interval,
-        telegram_proxy_url=telegram_proxy_url,
-        database_url=database_url,
-        sqlite_path=sqlite_path,
-        reviews_json=reviews_json,
-        kwork_email_imap_host=kwork_email_imap_host,
+        telegram_proxy_url=os.getenv("TELEGRAM_PROXY_URL", "").strip(),
+        database_url=os.getenv("DATABASE_URL", "").strip(),
+        sqlite_path=os.getenv("SQLITE_PATH", "bot_data.sqlite3").strip(),
+        reviews_json=os.getenv("REVIEWS_JSON", "").strip(),
+        kwork_email_imap_host=os.getenv("KWORK_EMAIL_IMAP_HOST", "").strip(),
         kwork_email_imap_port=kwork_email_imap_port,
-        kwork_email_login=kwork_email_login,
-        kwork_email_password=kwork_email_password,
-        kwork_email_folder=kwork_email_folder,
-        kwork_email_from_filter=kwork_email_from_filter,
+        kwork_email_login=os.getenv("KWORK_EMAIL_LOGIN", "").strip(),
+        kwork_email_password=os.getenv("KWORK_EMAIL_PASSWORD", "").strip(),
+        kwork_email_folder=os.getenv("KWORK_EMAIL_FOLDER", "INBOX").strip(),
+        kwork_email_from_filter=os.getenv("KWORK_EMAIL_FROM_FILTER", "kwork").strip(),
         kwork_email_client_keywords=_csv_env(
             "KWORK_EMAIL_CLIENT_KEYWORDS",
             "новое сообщение,сообщение от,вам написал,покупатель,клиент,личное сообщение,"

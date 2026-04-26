@@ -5,7 +5,6 @@ import logging
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
 
 from config import Config
 
@@ -20,6 +19,13 @@ class StoredReview:
     project: str
     text: str
     source: str
+
+
+@dataclass(frozen=True)
+class DatabaseStats:
+    technical_specs: int
+    reviews: int
+    processed_emails: int
 
 
 def _is_postgres(config: Config) -> bool:
@@ -43,10 +49,6 @@ def _connect(config: Config):
         connection.commit()
     finally:
         connection.close()
-
-
-def _execute(connection, query: str, params: tuple = ()) -> None:
-    connection.execute(query, params)
 
 
 def _adapt_query(config: Config, query: str) -> str:
@@ -92,7 +94,7 @@ def init_database(config: Config) -> None:
             )
             """,
         ):
-            _execute(connection, _adapt_query(config, query))
+            connection.execute(_adapt_query(config, query))
 
     logger.info("Database initialized: %s", "PostgreSQL" if _is_postgres(config) else f"SQLite {config.sqlite_path}")
     bootstrap_reviews(config)
@@ -214,7 +216,8 @@ def _load_seed_reviews(config: Config) -> list[dict]:
     raw_json = config.reviews_json
     if not raw_json:
         try:
-            raw_json = open("reviews.json", "r", encoding="utf-8").read()
+            with open("reviews.json", "r", encoding="utf-8") as file:
+                raw_json = file.read()
         except FileNotFoundError:
             return []
 
@@ -242,3 +245,16 @@ def bootstrap_reviews(config: Config) -> None:
             text=str(item["text"]),
             source=str(item.get("source", "Kwork")),
         )
+
+
+def get_stats(config: Config) -> DatabaseStats:
+    with _connect(config) as connection:
+        specs_count = connection.execute("SELECT COUNT(*) AS count FROM technical_specs").fetchone()["count"]
+        reviews_count = connection.execute("SELECT COUNT(*) AS count FROM reviews WHERE is_public = 1").fetchone()["count"]
+        emails_count = connection.execute("SELECT COUNT(*) AS count FROM processed_emails").fetchone()["count"]
+
+    return DatabaseStats(
+        technical_specs=int(specs_count),
+        reviews=int(reviews_count),
+        processed_emails=int(emails_count),
+    )
