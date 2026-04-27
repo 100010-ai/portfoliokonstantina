@@ -48,7 +48,7 @@ def _parse_int(value: str, default: int, name: str) -> int:
 
 
 def load_config() -> Config:
-    load_dotenv()
+    load_dotenv(encoding="utf-8-sig")
 
     bot_token = os.getenv("BOT_TOKEN", "").strip()
     admin_id_raw = os.getenv("ADMIN_ID", "").strip()
