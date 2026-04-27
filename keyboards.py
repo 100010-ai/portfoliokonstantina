@@ -25,15 +25,15 @@ DEFAULT_KWORK_URL = "https://kwork.ru"
 
 
 MAIN_MENU_BUTTONS = (
-    ("👤 Константин", CALLBACK_ABOUT),
+    ("👤 Обо мне", CALLBACK_ABOUT),
     ("🧰 Услуги", CALLBACK_SERVICES),
-    ("📂 Примеры", CALLBACK_WORKS),
+    ("📂 Кейсы", CALLBACK_WORKS),
     ("⭐ Отзывы", CALLBACK_REVIEWS),
     ("💳 Цены", CALLBACK_PRICES),
     ("🧭 Процесс", CALLBACK_PROCESS),
     ("💬 FAQ", CALLBACK_FAQ),
-    ("📝 Собрать ТЗ", CALLBACK_REQUEST),
-    ("🛒 Заказать бота", CALLBACK_KWORK),
+    ("📝 Быстрое ТЗ", CALLBACK_REQUEST),
+    ("🛒 Заказать на Kwork", CALLBACK_KWORK),
     ("📌 Как оформить заказ", CALLBACK_ORDER_GUIDE),
 )
 
@@ -95,11 +95,11 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 _button(text="📊 Статус", callback_data=CALLBACK_ADMIN_STATUS),
-                _button(text="📝 ТЗ", callback_data=CALLBACK_ADMIN_LAST_TZ),
+                _button(text="📝 Последние ТЗ", callback_data=CALLBACK_ADMIN_LAST_TZ),
             ],
-            [_button(text="⭐ Синхра отзывов", callback_data=CALLBACK_ADMIN_SYNC_REVIEWS)],
-            [_button(text="➕ Как добавить отзыв", callback_data=CALLBACK_ADMIN_HELP)],
-            [_button(text="← В меню", callback_data=CALLBACK_BACK)],
+            [_button(text="🔄 Обновить отзывы", callback_data=CALLBACK_ADMIN_SYNC_REVIEWS)],
+            [_button(text="➕ Добавить отзыв", callback_data=CALLBACK_ADMIN_HELP)],
+            [_button(text="↩️ В меню", callback_data=CALLBACK_BACK)],
         ]
     )
 
@@ -107,7 +107,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
 def back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [_button(text="← Назад", callback_data=CALLBACK_BACK)],
+            [_button(text="↩️ Назад в меню", callback_data=CALLBACK_BACK)],
         ]
     )
 
@@ -119,9 +119,9 @@ def form_keyboard() -> InlineKeyboardMarkup:
 def kwork_keyboard(profile_url: str, service_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [_button(text="🛒 Открыть мой Kwork", url=profile_url)],
+            [_button(text="👤 Открыть профиль Kwork", url=profile_url)],
             [_button(text="🤖 Заказать Telegram-бота", url=service_url)],
-            [_button(text="← Назад", callback_data=CALLBACK_BACK)],
+            [_button(text="↩️ Назад в меню", callback_data=CALLBACK_BACK)],
         ]
     )
 
@@ -131,6 +131,6 @@ def kwork_order_keyboard(service_url: str, copy_text: str | None = None) -> Inli
     if copy_text and len(copy_text) <= 256:
         rows.append([_button(text="📋 Скопировать ТЗ", copy_text=copy_text)])
     rows.append([_button(text="🛒 Оформить заказ на Kwork", url=service_url)])
-    rows.append([_button(text="← Назад", callback_data=CALLBACK_BACK)])
+    rows.append([_button(text="↩️ Назад в меню", callback_data=CALLBACK_BACK)])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)

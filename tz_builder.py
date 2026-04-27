@@ -33,8 +33,8 @@ def _pick(text: str, rules: list[tuple[tuple[str, ...], str]], default: str) -> 
 def _items(items: list[str]) -> str:
     unique_items = list(dict.fromkeys(item for item in items if item))
     if not unique_items:
-        return "- не указано"
-    return "\n".join(f"- {item}" for item in unique_items)
+        return "• не указано"
+    return "\n".join(f"• {item}" for item in unique_items)
 
 
 def _extract_deadline(text: str, fallback: str = "нужно согласовать") -> str:
@@ -319,33 +319,39 @@ def _build_from_description(description: str, deadline: str = "", budget: str = 
     plain_text = f"""
 ТЗ для заказа на Kwork
 
-1. Тип бота
+📌 1. Тип бота
 {bot_type}
 
-2. Задача
-Бот должен {goal}.
+🎯 2. Цель
+Бот должен {goal}. Главная задача - сделать путь пользователя понятным, а обработку заявок или действий удобной для администратора.
 
-3. Для кого
+👥 3. Для кого
 {audience}.
 
-4. Функции
+🧭 4. Пользовательский сценарий
+{_build_flow(description)}
+
+🧩 5. Основные функции
 {_items(modules)}
 
-5. Данные
+🗂 6. Какие данные собирать
 {_items(data_fields)}
 
-6. Интеграции
+🔗 7. Интеграции
 {_items(integrations)}
 
-7. Первая версия
+🚀 8. Первая версия
 {_items(mvp)}
 
-8. Срок и бюджет
+⏱ 9. Срок и бюджет
 Срок: {deadline}
 Бюджет: {budget}
 
-9. Уточнить
-{_items(questions)}
+⚠️ 10. Важные моменты
+{_items(risks)}
+
+❓ 11. Что уточнить перед стартом
+{_items(questions or ["проверить финальный список кнопок, текстов и интеграций перед началом разработки"])}
 """.strip()
 
     plain_text = re.sub(r"\n{3,}", "\n\n", plain_text)

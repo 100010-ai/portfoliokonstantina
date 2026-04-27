@@ -64,7 +64,7 @@ from tz_builder import build_technical_spec
 logger = logging.getLogger(__name__)
 router = Router()
 MAX_TZ_INPUT_LENGTH = 1500
-ADMIN_ONLY_TEXT = "Команда доступна только администратору."
+ADMIN_ONLY_TEXT = "🔒 Команда доступна только администратору."
 
 
 @router.message.outer_middleware()
@@ -129,48 +129,57 @@ def _status_text(config: Config) -> str:
     try:
         stats = get_stats(config)
         stats_text = (
-            f"<b>ТЗ в базе:</b> {stats.technical_specs}\n"
-            f"<b>Отзывы:</b> {stats.reviews}\n"
-            f"<b>Обработано email:</b> {stats.processed_emails}"
+            f"📝 <b>ТЗ в базе:</b> {stats.technical_specs}\n"
+            f"⭐ <b>Отзывы:</b> {stats.reviews}\n"
+            f"📬 <b>Обработано email:</b> {stats.processed_emails}"
         )
     except Exception:
         logger.exception("Could not load database stats.")
-        stats_text = "<b>Статистика базы:</b> временно недоступна"
+        stats_text = "⚠️ <b>Статистика базы:</b> временно недоступна"
 
     return f"""
 <b>⚙️ Админ-панель</b>
+<i>Короткая сводка по настройкам и данным бота.</i>
 
-<b>Kwork профиль:</b> {"заполнен" if config.kwork_profile_url else "не заполнен"}
-<b>Kwork услуга:</b> {"заполнена" if config.kwork_bot_service_url else "не заполнена"}
-<b>Ссылка отзывов:</b> {"заполнена" if config.kwork_reviews_url else "не заполнена"}
-<b>База данных:</b> {"PostgreSQL" if config.database_url else "SQLite"}
-<b>Email-уведомления:</b> {"включены" if email_enabled else "выключены"}
+🔗 <b>Kwork профиль:</b> {"заполнен" if config.kwork_profile_url else "не заполнен"}
+🛒 <b>Kwork услуга:</b> {"заполнена" if config.kwork_bot_service_url else "не заполнена"}
+⭐ <b>Ссылка отзывов:</b> {"заполнена" if config.kwork_reviews_url else "не заполнена"}
+🗄 <b>База данных:</b> {"PostgreSQL" if config.database_url else "SQLite"}
+🔔 <b>Email-уведомления:</b> {"включены" if email_enabled else "выключены"}
 
 {stats_text}
 
-<b>IMAP папка:</b> {html.escape(config.kwork_email_folder)}
-<b>Проверка почты:</b> каждые {config.kwork_email_check_interval} сек.
-<b>Синхра отзывов:</b> каждые {config.reviews_sync_interval} сек.
+📁 <b>IMAP папка:</b> {html.escape(config.kwork_email_folder)}
+⏱ <b>Проверка почты:</b> каждые {config.kwork_email_check_interval} сек.
+🔄 <b>Синхронизация отзывов:</b> каждые {config.reviews_sync_interval} сек.
 """.strip()
 
 
 def _admin_help_text() -> str:
     return """
-<b>Админ</b>
+<b>⚙️ Админ-команды</b>
+<i>Короткая шпаргалка для обслуживания бота.</i>
 
+<b>➕ Добавить отзыв вручную:</b>
 <code>/add_review 5 | Клиент Kwork | Telegram-бот | Текст отзыва</code>
-<code>/last_tz</code> - последние ТЗ
-<code>/status</code> - статус
-<code>/sync_reviews</code> - синхра отзывов
+
+<b>📝 Последние ТЗ:</b>
+<code>/last_tz</code>
+
+<b>📊 Статус сервиса:</b>
+<code>/status</code>
+
+<b>🔄 Обновить отзывы с Kwork:</b>
+<code>/sync_reviews</code>
 """.strip()
 
 
 def _latest_tz_text(config: Config) -> str:
     specs = get_recent_technical_specs(config, limit=3)
     if not specs:
-        return "<b>Последние ТЗ</b>\n\nПока пусто."
+        return "<b>📝 Последние ТЗ</b>\n\nПока пусто. Когда пользователь соберет ТЗ через бота, оно появится здесь."
 
-    blocks = ["<b>Последние ТЗ</b>"]
+    blocks = ["<b>📝 Последние ТЗ</b>", "<i>Показываю 3 последних заявки из базы.</i>"]
     for item in specs:
         preview = item.spec_text.strip()
         if len(preview) > 550:
@@ -285,7 +294,7 @@ async def main_menu_callback(callback: CallbackQuery, state: FSMContext, config:
 @router.callback_query(F.data == CALLBACK_ADMIN)
 async def admin_panel_callback(callback: CallbackQuery, config: Config) -> None:
     if not _is_admin_user(callback, config):
-        await callback.answer("Недоступно", show_alert=False)
+        await callback.answer("🔒 Недоступно", show_alert=False)
         return
     status_text = await asyncio.to_thread(_status_text, config)
     await _edit_or_answer(callback, status_text, reply_markup=admin_keyboard())
@@ -294,7 +303,7 @@ async def admin_panel_callback(callback: CallbackQuery, config: Config) -> None:
 @router.callback_query(F.data == CALLBACK_ADMIN_STATUS)
 async def admin_status_callback(callback: CallbackQuery, config: Config) -> None:
     if not _is_admin_user(callback, config):
-        await callback.answer("Недоступно", show_alert=False)
+        await callback.answer("🔒 Недоступно", show_alert=False)
         return
     status_text = await asyncio.to_thread(_status_text, config)
     await _edit_or_answer(callback, status_text, reply_markup=admin_keyboard())
@@ -303,7 +312,7 @@ async def admin_status_callback(callback: CallbackQuery, config: Config) -> None
 @router.callback_query(F.data == CALLBACK_ADMIN_HELP)
 async def admin_help_callback(callback: CallbackQuery, config: Config) -> None:
     if not _is_admin_user(callback, config):
-        await callback.answer("Недоступно", show_alert=False)
+        await callback.answer("🔒 Недоступно", show_alert=False)
         return
     await _edit_or_answer(callback, _admin_help_text(), reply_markup=admin_keyboard())
 
@@ -311,7 +320,7 @@ async def admin_help_callback(callback: CallbackQuery, config: Config) -> None:
 @router.callback_query(F.data == CALLBACK_ADMIN_LAST_TZ)
 async def admin_last_tz_callback(callback: CallbackQuery, config: Config) -> None:
     if not _is_admin_user(callback, config):
-        await callback.answer("Недоступно", show_alert=False)
+        await callback.answer("🔒 Недоступно", show_alert=False)
         return
     text = await asyncio.to_thread(_latest_tz_text, config)
     await _edit_or_answer(callback, text, reply_markup=admin_keyboard())
@@ -320,18 +329,21 @@ async def admin_last_tz_callback(callback: CallbackQuery, config: Config) -> Non
 @router.callback_query(F.data == CALLBACK_ADMIN_SYNC_REVIEWS)
 async def admin_sync_reviews_callback(callback: CallbackQuery, config: Config) -> None:
     if not _is_admin_user(callback, config):
-        await callback.answer("Недоступно", show_alert=False)
+        await callback.answer("🔒 Недоступно", show_alert=False)
         return
 
-    await callback.answer("Запускаю синхронизацию...")
+    await callback.answer("🔄 Обновляю отзывы...")
     try:
         added_count = await asyncio.to_thread(sync_reviews_once, config)
     except Exception:
         logger.exception("Manual reviews sync failed.")
-        text = "Не удалось синхронизировать отзывы. Проверьте KWORK_REVIEWS_URL/KWORK_PROFILE_URL и логи Railway."
+        text = (
+            "<b>⚠️ Не удалось синхронизировать отзывы</b>\n\n"
+            "Проверьте <code>KWORK_REVIEWS_URL</code>, <code>KWORK_PROFILE_URL</code> и логи Railway."
+        )
     else:
         clear_reviews_cache()
-        text = f"<b>Синхронизация завершена</b>\n\nНовых отзывов добавлено: {added_count}."
+        text = f"<b>✅ Синхронизация завершена</b>\n\nНовых отзывов добавлено: <b>{added_count}</b>."
 
     if callback.message:
         try:
@@ -357,7 +369,10 @@ async def request_description(message: Message, state: FSMContext, bot: Bot, con
     description = message.text.strip()
     if len(description) < 15:
         warning = await message.answer(
-            "Опишите чуть подробнее: для чего нужен бот и что он должен делать. Можно одним сообщением простыми словами.",
+            (
+                "✍️ Опишите чуть подробнее: для чего нужен бот, что должен делать пользователь "
+                "и куда отправлять результат. Можно одним сообщением простыми словами."
+            ),
             reply_markup=form_keyboard(),
         )
         await state.update_data(last_bot_message_id=warning.message_id)
@@ -428,7 +443,7 @@ async def add_review_command(message: Message, config: Config) -> None:
     parts = [part.strip() for part in raw_text.split("|")]
     if len(parts) < 4:
         await message.answer(
-            "Формат:\n"
+            "<b>➕ Формат добавления отзыва:</b>\n"
             "<code>/add_review 5 | Клиент Kwork | Telegram-бот | Текст отзыва</code>"
         )
         return
@@ -450,9 +465,9 @@ async def add_review_command(message: Message, config: Config) -> None:
     )
     clear_reviews_cache()
     if added:
-        await message.answer("Отзыв добавлен в базу и теперь виден всем в разделе «Отзывы».")
+        await message.answer("✅ Отзыв добавлен в базу и теперь виден всем в разделе «Отзывы».")
     else:
-        await message.answer("Отзыв не добавлен: он пустой или уже есть в базе.")
+        await message.answer("⚠️ Отзыв не добавлен: он пустой или уже есть в базе.")
 
 
 @router.message(Command("sync_reviews"))
@@ -461,16 +476,19 @@ async def sync_reviews_command(message: Message, config: Config) -> None:
         await message.answer(ADMIN_ONLY_TEXT)
         return
 
-    await message.answer("Запускаю синхронизацию отзывов с публичной страницы Kwork...")
+    await message.answer("🔄 Запускаю синхронизацию отзывов с публичной страницы Kwork...")
     try:
         added_count = await asyncio.to_thread(sync_reviews_once, config)
     except Exception:
         logger.exception("Manual reviews sync failed.")
-        await message.answer("Не удалось синхронизировать отзывы. Проверьте KWORK_REVIEWS_URL/KWORK_PROFILE_URL и логи Railway.")
+        await message.answer(
+            "<b>⚠️ Не удалось синхронизировать отзывы</b>\n\n"
+            "Проверьте <code>KWORK_REVIEWS_URL</code>, <code>KWORK_PROFILE_URL</code> и логи Railway."
+        )
         return
 
     clear_reviews_cache()
-    await message.answer(f"Синхронизация завершена. Новых отзывов добавлено: {added_count}.")
+    await message.answer(f"<b>✅ Синхронизация завершена</b>\n\nНовых отзывов добавлено: <b>{added_count}</b>.")
 
 
 @router.callback_query(F.data == CALLBACK_BACK)
@@ -488,7 +506,7 @@ async def cancel_form_or_back(callback: CallbackQuery, state: FSMContext, config
 
 @router.callback_query()
 async def unknown_callback(callback: CallbackQuery) -> None:
-    await callback.answer("Раздел не найден", show_alert=False)
+    await callback.answer("Раздел не найден 🙂", show_alert=False)
 
 
 @router.message()
